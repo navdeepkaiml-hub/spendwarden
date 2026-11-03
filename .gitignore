@@ -1,5 +1,6 @@
 # secrets
 .env
+.vault_token
 *.pem
 *.key
 
@@ -26,4 +27,3 @@ dist/
 .idea/
 .DS_Store
 Thumbs.db
-.vault_token
