@@ -1,18 +1,23 @@
 """Core logic shared by the REST API and the MCP server.
 
-Day 2 walking skeleton: decide() allows everything. The policy engine (Day 3), intent
-verifier (Day 4) and approvals (Day 5) replace it. Everything else here stays.
+Flow: validate -> record -> policy decision -> (ALLOW) pay | (ESCALATE) wait for a human | (DENY) stop.
+Every step is written to the hash-chained ledger. The intent verifier (Day 4) plugs in at the
+decision step and can only make the outcome stricter.
 """
 import json
+import threading
 import time
 import uuid
 from decimal import Decimal, InvalidOperation
 
-from server import config, db, ledger, paypal
+from server import config, db, ledger, paypal, policy
+
+# One purchase is decided and paid at a time, so budget checks cannot race each other.
+_lock = threading.RLock()
 
 ALLOWED_UPDATE_COLUMNS = {
     "decision", "decision_reason", "status", "paypal_order_id",
-    "paypal_capture_id", "approve_url", "error",
+    "paypal_capture_id", "approve_url", "error", "checks",
 }
 
 
@@ -42,17 +47,14 @@ def _clean(merchant, items, amount, currency, rationale):
     }
 
 
-def decide(proposal):
-    """Placeholder decision. Replaced by the policy engine and intent verifier."""
-    return {"decision": "ALLOW", "reason": "walking skeleton: no checks yet"}
-
-
 def _update(purchase_id, **fields):
     bad = set(fields) - ALLOWED_UPDATE_COLUMNS
     if bad:
         raise ValueError("cannot update columns: %s" % sorted(bad))
     if not fields:
         return
+    if isinstance(fields.get("checks"), (list, dict)):
+        fields["checks"] = json.dumps(fields["checks"])
     sets = ", ".join("%s = ?" % col for col in fields)
     with db.connect() as conn:
         conn.execute("UPDATE purchases SET %s WHERE id = ?" % sets, list(fields.values()) + [purchase_id])
@@ -61,6 +63,7 @@ def _update(purchase_id, **fields):
 def _row_to_dict(row):
     d = dict(row)
     d["items"] = json.loads(d["items"])
+    d["checks"] = json.loads(d["checks"]) if d.get("checks") else []
     return d
 
 
@@ -72,9 +75,16 @@ def get_purchase(purchase_id):
     return _row_to_dict(row)
 
 
-def list_purchases(limit=50):
+def list_purchases(limit=50, status=None):
+    query = "SELECT * FROM purchases"
+    args = []
+    if status:
+        query += " WHERE status = ?"
+        args.append(status)
+    query += " ORDER BY created_at DESC LIMIT ?"
+    args.append(int(limit))
     with db.connect() as conn:
-        rows = conn.execute("SELECT * FROM purchases ORDER BY created_at DESC LIMIT ?", (int(limit),)).fetchall()
+        rows = conn.execute(query, args).fetchall()
     return [_row_to_dict(r) for r in rows]
 
 
@@ -118,40 +128,73 @@ def _pay(purchase_id, p):
 def propose_purchase(merchant, items, amount, currency="USD", rationale=""):
     p = _clean(merchant, items, amount, currency, rationale)
     purchase_id = "pur_" + uuid.uuid4().hex[:12]
-    with db.connect() as conn:
-        conn.execute(
-            "INSERT INTO purchases (id, created_at, merchant, items, amount, currency, rationale,"
-            " decision, decision_reason, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (purchase_id, time.time(), p["merchant"], json.dumps(p["items"]), p["amount"],
-             p["currency"], p["rationale"], "PENDING", "", "RECEIVED"),
+    with _lock:
+        with db.connect() as conn:
+            conn.execute(
+                "INSERT INTO purchases (id, created_at, merchant, items, amount, currency, rationale,"
+                " decision, decision_reason, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (purchase_id, time.time(), p["merchant"], json.dumps(p["items"]), p["amount"],
+                 p["currency"], p["rationale"], "PENDING", "", "RECEIVED"),
+            )
+        ledger.append(purchase_id, "proposed", p)
+
+        verdict = policy.evaluate(p, policy.get_policy(), purchase_id)
+        _update(purchase_id, decision=verdict["decision"], decision_reason=verdict["reason"], checks=verdict["checks"])
+        ledger.append(purchase_id, "decided", verdict)
+
+        if verdict["decision"] == "ALLOW":
+            return _pay(purchase_id, p)
+        status = "DENIED" if verdict["decision"] == "DENY" else "AWAITING_APPROVAL"
+        _update(purchase_id, status=status)
+        return get_purchase(purchase_id)
+
+
+def approve(purchase_id, approver="dashboard"):
+    """A human approves an escalated purchase. Hard rules are re-checked first, because
+    budgets may have changed since the request was made."""
+    with _lock:
+        purchase = get_purchase(purchase_id)
+        if purchase["status"] != "AWAITING_APPROVAL":
+            raise ValueError("purchase is %s, not AWAITING_APPROVAL" % purchase["status"])
+        p = {k: purchase[k] for k in ("merchant", "items", "amount", "currency", "rationale")}
+        verdict = policy.evaluate(
+            p, policy.get_policy(), purchase_id, skip=("velocity", "auto_approve_limit")
         )
-    ledger.append(purchase_id, "proposed", p)
-
-    verdict = decide(p)
-    _update(purchase_id, decision=verdict["decision"], decision_reason=verdict["reason"])
-    ledger.append(purchase_id, "decided", verdict)
-
-    if verdict["decision"] == "ALLOW":
+        ledger.append(purchase_id, "human_approved", {"by": approver})
+        if verdict["decision"] == "DENY":
+            reason = "re-checked at approval time: " + verdict["reason"]
+            _update(purchase_id, status="DENIED", decision="DENY", decision_reason=reason, checks=verdict["checks"])
+            ledger.append(purchase_id, "denied_at_approval", {"reason": reason})
+            return get_purchase(purchase_id)
+        _update(purchase_id, decision="ALLOW", decision_reason="approved by a human (%s)" % approver)
         return _pay(purchase_id, p)
-    status = "DENIED" if verdict["decision"] == "DENY" else "AWAITING_APPROVAL"
-    _update(purchase_id, status=status)
-    return get_purchase(purchase_id)
+
+
+def reject(purchase_id, approver="dashboard"):
+    with _lock:
+        purchase = get_purchase(purchase_id)
+        if purchase["status"] != "AWAITING_APPROVAL":
+            raise ValueError("purchase is %s, not AWAITING_APPROVAL" % purchase["status"])
+        _update(purchase_id, status="APPROVAL_DENIED", decision="DENY", decision_reason="rejected by a human (%s)" % approver)
+        ledger.append(purchase_id, "human_rejected", {"by": approver})
+        return get_purchase(purchase_id)
 
 
 def capture_approved(purchase_id):
-    """Approval mode only: capture an order after the buyer approved it."""
-    purchase = get_purchase(purchase_id)
-    if purchase["status"] != "AWAITING_PAYER":
-        raise ValueError("purchase is %s, not AWAITING_PAYER" % purchase["status"])
-    try:
-        token = paypal.get_token()
-        result = paypal.summarize(paypal.capture(token, purchase["paypal_order_id"]))
-        if result["capture_status"] == "COMPLETED":
-            fields = {"status": "PAID", "paypal_capture_id": result["capture_id"]}
-        else:
-            fields = {"status": "PAYMENT_FAILED", "error": "unexpected capture status %s" % result["capture_status"]}
-    except paypal.PayPalError as exc:
-        fields = {"status": "AWAITING_PAYER", "error": str(exc)}  # buyer may not have approved yet
-    _update(purchase_id, **fields)
-    ledger.append(purchase_id, "capture_result", fields)
-    return get_purchase(purchase_id)
+    """Approval-link mode only: capture an order after the buyer approved it on PayPal."""
+    with _lock:
+        purchase = get_purchase(purchase_id)
+        if purchase["status"] != "AWAITING_PAYER":
+            raise ValueError("purchase is %s, not AWAITING_PAYER" % purchase["status"])
+        try:
+            token = paypal.get_token()
+            result = paypal.summarize(paypal.capture(token, purchase["paypal_order_id"]))
+            if result["capture_status"] == "COMPLETED":
+                fields = {"status": "PAID", "paypal_capture_id": result["capture_id"]}
+            else:
+                fields = {"status": "PAYMENT_FAILED", "error": "unexpected capture status %s" % result["capture_status"]}
+        except paypal.PayPalError as exc:
+            fields = {"status": "AWAITING_PAYER", "error": str(exc)}  # buyer may not have approved yet
+        _update(purchase_id, **fields)
+        ledger.append(purchase_id, "capture_result", fields)
+        return get_purchase(purchase_id)

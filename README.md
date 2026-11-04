@@ -6,9 +6,9 @@ SpendWarden sits between an AI agent and PayPal. The agent never holds payment
 credentials. Every purchase is checked against hard limits, verified against what the
 user actually asked for, and recorded in a tamper-evident audit log.
 
-Status: Day 2 of the PayPal AI Hackathon build. The walking skeleton works end to end
-(agent request -> SpendWarden -> PayPal sandbox payment -> hash-chained ledger). The
-policy engine and intent verifier are next; for now every purchase is allowed.
+Status: Day 3 of the PayPal AI Hackathon build. Purchases now go through a deterministic
+policy engine (per-transaction cap, daily and weekly budgets, merchant allowlist, currency lock,
+velocity circuit breaker) with human approval for larger amounts. The LLM intent verifier is next.
 
 ## Quickstart (Windows PowerShell)
 
@@ -26,7 +26,10 @@ In a second window:
 
 ```powershell
 .\.venv\Scripts\python scripts\try_purchase.py --amount 18.00
+.\.venv\Scripts\python scripts\demo_scenes.py      # normal purchase, blocked attack, human approval
 ```
+
+Useful endpoints: `/v1/policy`, `/v1/budget`, `/v1/approvals`, `/v1/purchases/{id}/approve`.
 
 API docs: http://127.0.0.1:8000/docs  ·  Ledger check: http://127.0.0.1:8000/v1/audit/verify
 

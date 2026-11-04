@@ -19,7 +19,12 @@ CREATE TABLE IF NOT EXISTS purchases (
     paypal_order_id TEXT,
     paypal_capture_id TEXT,
     approve_url TEXT,
-    error TEXT
+    error TEXT,
+    checks TEXT
+);
+CREATE TABLE IF NOT EXISTS policy (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    body TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS audit (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -30,10 +35,18 @@ CREATE TABLE IF NOT EXISTS audit (
 """
 
 
+def _migrate(conn):
+    """Bring databases created by older versions up to date."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(purchases)")}
+    if "checks" not in cols:
+        conn.execute("ALTER TABLE purchases ADD COLUMN checks TEXT")
+
+
 def _open(autocommit):
     conn = sqlite3.connect(config.DB_PATH, timeout=10, isolation_level=None if autocommit else "")
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
 
 

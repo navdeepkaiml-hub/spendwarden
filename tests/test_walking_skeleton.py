@@ -43,11 +43,11 @@ def test_vault_purchase_is_paid_and_ledgered(monkeypatch):
 def test_invalid_input_is_rejected():
     for amount in ["abc", "-5", "0", "NaN", "Infinity"]:
         with pytest.raises(ValueError):
-            core.propose_purchase("Store", [], amount)
+            core.propose_purchase("Demo Store", [], amount)
     with pytest.raises(ValueError):
         core.propose_purchase("", [], "5")
     with pytest.raises(ValueError):
-        core.propose_purchase("Store", [], "5", currency="DOLLARS")
+        core.propose_purchase("Demo Store", [], "5", currency="DOLLARS")
     assert core.list_purchases() == []
 
 
@@ -55,7 +55,7 @@ def test_paypal_failure_is_recorded_not_raised(monkeypatch):
     def boom(*a, **k):
         raise paypal.PayPalError("Vault charge failed (HTTP 422)")
     monkeypatch.setattr(paypal, "charge_vault", boom)
-    result = core.propose_purchase("Store", ["x"], "10")
+    result = core.propose_purchase("Demo Store", ["x"], "10")
     assert result["status"] == "PAYMENT_FAILED"
     assert "HTTP 422" in result["error"]
     assert ledger.verify()["ok"] is True
@@ -63,20 +63,20 @@ def test_paypal_failure_is_recorded_not_raised(monkeypatch):
 
 def test_missing_vault_token_is_a_clear_failure(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "VAULT_TOKEN_FILE", tmp_path / "nope")
-    result = core.propose_purchase("Store", ["x"], "10")
+    result = core.propose_purchase("Demo Store", ["x"], "10")
     assert result["status"] == "PAYMENT_FAILED"
     assert "paypal_vault_spike.py" in result["error"]
 
 
 def test_incomplete_capture_is_not_marked_paid(monkeypatch):
     monkeypatch.setattr(paypal, "charge_vault", fake_vault_charge(status="PENDING"))
-    assert core.propose_purchase("Store", ["x"], "10")["status"] == "PAYMENT_FAILED"
+    assert core.propose_purchase("Demo Store", ["x"], "10")["status"] == "PAYMENT_FAILED"
 
 
 def test_approval_mode_flow(monkeypatch):
     monkeypatch.setattr(config, "PAYMENT_MODE", "approval")
     monkeypatch.setattr(paypal, "create_order_for_approval", lambda t, a, c, r: ("ORD9", "https://sandbox/approve"))
-    first = core.propose_purchase("Store", ["x"], "12.50")
+    first = core.propose_purchase("Demo Store", ["x"], "12.50")
     assert first["status"] == "AWAITING_PAYER" and first["approve_url"] == "https://sandbox/approve"
 
     monkeypatch.setattr(paypal, "capture", lambda t, o: {
@@ -90,12 +90,12 @@ def test_approval_mode_flow(monkeypatch):
 
 def test_unknown_payment_mode_fails_closed(monkeypatch):
     monkeypatch.setattr(config, "PAYMENT_MODE", "banana")
-    assert core.propose_purchase("Store", ["x"], "10")["status"] == "PAYMENT_FAILED"
+    assert core.propose_purchase("Demo Store", ["x"], "10")["status"] == "PAYMENT_FAILED"
 
 
 def test_ledger_detects_tampering(monkeypatch):
     monkeypatch.setattr(paypal, "charge_vault", fake_vault_charge())
-    core.propose_purchase("Store", ["x"], "10")
+    core.propose_purchase("Demo Store", ["x"], "10")
     conn = sqlite3.connect(config.DB_PATH)
     conn.execute("UPDATE audit SET payload = replace(payload, '10.00', '1.00') WHERE seq = 1")
     conn.commit()

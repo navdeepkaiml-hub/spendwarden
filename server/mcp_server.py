@@ -9,17 +9,24 @@ except ImportError:  # mcp 2.x renamed it
 
 from typing import List
 
-from server import core
+from server import core, policy
 
 mcp = _MCPServer("spendwarden")
 
 
 @mcp.tool()
+def get_budget() -> dict:
+    """Remaining budget and limits. Check this before proposing a purchase."""
+    return policy.budget_status()
+
+
+@mcp.tool()
 def propose_purchase(merchant: str, items: List[str], amount: str, currency: str = "USD", rationale: str = "") -> dict:
-    """Ask SpendWarden to make a purchase. Returns the decision and the payment status.
+    """Ask SpendWarden to make a purchase. Returns the decision, the reason, and the payment status.
 
     merchant: store name. items: what is being bought. amount: total as a string like "18.00".
     rationale: why this purchase serves the user's task.
+    Possible statuses: PAID, DENIED, AWAITING_APPROVAL (a human must approve), PAYMENT_FAILED.
     """
     try:
         return core.propose_purchase(merchant, items, amount, currency, rationale)
@@ -29,7 +36,7 @@ def propose_purchase(merchant: str, items: List[str], amount: str, currency: str
 
 @mcp.tool()
 def get_purchase_status(purchase_id: str) -> dict:
-    """Look up a purchase by id."""
+    """Look up a purchase by id, for example to see whether a human has approved it yet."""
     try:
         return core.get_purchase(purchase_id)
     except LookupError as exc:
