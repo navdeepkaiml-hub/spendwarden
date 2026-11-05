@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from server import config, core, ledger, policy
 
-app = FastAPI(title="SpendWarden", version="0.2.0")
+app = FastAPI(title="SpendWarden", version="0.3.0")
 
 
 class PurchaseIn(BaseModel):
@@ -15,17 +15,24 @@ class PurchaseIn(BaseModel):
     amount: Union[str, int, float]
     currency: str = "USD"
     rationale: str = ""
+    mandate_id: Optional[str] = None
+    evidence: List[str] = Field(default_factory=list)
+
+
+class MandateIn(BaseModel):
+    task: str
 
 
 @app.get("/health")
 def health():
-    return {"ok": True, "payment_mode": config.PAYMENT_MODE}
+    return {"ok": True, "payment_mode": config.PAYMENT_MODE, "verifier_mode": config.VERIFIER_MODE}
 
 
 @app.post("/v1/purchases")
 def create_purchase(body: PurchaseIn):
     try:
-        return core.propose_purchase(body.merchant, body.items, body.amount, body.currency, body.rationale)
+        return core.propose_purchase(body.merchant, body.items, body.amount, body.currency, body.rationale,
+                                     body.mandate_id, body.evidence)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
@@ -50,6 +57,27 @@ def _transition(fn, purchase_id):
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
+
+
+@app.post("/v1/mandates")
+def create_mandate(body: MandateIn):
+    try:
+        return core.create_mandate(body.task)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.get("/v1/mandates")
+def list_mandates():
+    return core.list_mandates()
+
+
+@app.get("/v1/mandates/{mandate_id}")
+def read_mandate(mandate_id: str):
+    try:
+        return core.get_mandate(mandate_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
 
 @app.get("/v1/approvals")

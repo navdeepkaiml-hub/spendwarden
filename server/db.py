@@ -20,7 +20,14 @@ CREATE TABLE IF NOT EXISTS purchases (
     paypal_capture_id TEXT,
     approve_url TEXT,
     error TEXT,
-    checks TEXT
+    checks TEXT,
+    mandate_id TEXT,
+    verifier TEXT
+);
+CREATE TABLE IF NOT EXISTS mandates (
+    id TEXT PRIMARY KEY,
+    created_at REAL NOT NULL,
+    task TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS policy (
     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -38,8 +45,9 @@ CREATE TABLE IF NOT EXISTS audit (
 def _migrate(conn):
     """Bring databases created by older versions up to date."""
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(purchases)")}
-    if "checks" not in cols:
-        conn.execute("ALTER TABLE purchases ADD COLUMN checks TEXT")
+    for name in ("checks", "mandate_id", "verifier"):
+        if name not in cols:
+            conn.execute("ALTER TABLE purchases ADD COLUMN %s TEXT" % name)
 
 
 def _open(autocommit):

@@ -7,6 +7,7 @@ try:  # mcp 1.x
 except ImportError:  # mcp 2.x renamed it
     from mcp.server.mcpserver import MCPServer as _MCPServer
 
+import os
 from typing import List
 
 from server import core, policy
@@ -21,15 +22,19 @@ def get_budget() -> dict:
 
 
 @mcp.tool()
-def propose_purchase(merchant: str, items: List[str], amount: str, currency: str = "USD", rationale: str = "") -> dict:
+def propose_purchase(merchant: str, items: List[str], amount: str, currency: str = "USD",
+                     rationale: str = "", evidence: List[str] = []) -> dict:
     """Ask SpendWarden to make a purchase. Returns the decision, the reason, and the payment status.
 
     merchant: store name. items: what is being bought. amount: total as a string like "18.00".
     rationale: why this purchase serves the user's task.
+    evidence: the text you relied on (page content, tool output). It is checked for prompt injection.
     Possible statuses: PAID, DENIED, AWAITING_APPROVAL (a human must approve), PAYMENT_FAILED.
     """
     try:
-        return core.propose_purchase(merchant, items, amount, currency, rationale)
+        # The mandate (the user's task) is set by whoever launches this server, so the agent cannot change it.
+        mandate_id = os.getenv("SPENDWARDEN_MANDATE_ID") or None
+        return core.propose_purchase(merchant, items, amount, currency, rationale, mandate_id, evidence)
     except ValueError as exc:
         return {"status": "REJECTED_INVALID", "error": str(exc)}
 

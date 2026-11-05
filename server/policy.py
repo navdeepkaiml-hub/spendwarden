@@ -18,6 +18,9 @@ DEFAULT_POLICY = {
     "merchant_allowlist": ["Demo Store"],
     "velocity_max_purchases": 5,
     "velocity_window_seconds": 60,
+    "require_mandate": False,
+    "verifier_escalate_below": 0.7,
+    "verifier_deny_below": 0.4,
 }
 MONEY_KEYS = ("per_txn_cap", "auto_approve_limit", "daily_budget", "weekly_budget")
 DAY = 24 * 3600
@@ -66,13 +69,26 @@ def validate_policy(raw, base=None):
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
             raise ValueError("%s must be a whole number of at least 1" % key)
         out[key] = value
+
+    if not isinstance(merged["require_mandate"], bool):
+        raise ValueError("require_mandate must be true or false")
+    out["require_mandate"] = merged["require_mandate"]
+
+    for key in ("verifier_escalate_below", "verifier_deny_below"):
+        value = merged[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
+            raise ValueError("%s must be a number between 0 and 1" % key)
+        out[key] = float(value)
+    if out["verifier_deny_below"] > out["verifier_escalate_below"]:
+        raise ValueError("verifier_deny_below cannot exceed verifier_escalate_below")
     return out
 
 
 def get_policy():
     with db.connect() as conn:
         row = conn.execute("SELECT body FROM policy WHERE id = 1").fetchone()
-    return json.loads(row["body"]) if row else validate_policy({})
+    # Merge onto the defaults so policies saved by older versions gain any new fields.
+    return validate_policy(json.loads(row["body"])) if row else validate_policy({})
 
 
 def set_policy(raw, who="api"):
@@ -107,7 +123,7 @@ def recent_proposals(seconds, exclude_id=None):
     return row["n"]
 
 
-def evaluate(proposal, pol, purchase_id, skip=()):
+def evaluate(proposal, pol, purchase_id, skip=(), has_mandate=False):
     """Run every rule. Returns {"decision", "reason", "checks"}."""
     amount = Decimal(proposal["amount"])
     checks = []
@@ -118,6 +134,10 @@ def evaluate(proposal, pol, purchase_id, skip=()):
 
     add("currency_lock", proposal["currency"] == pol["currency"], "deny",
         "currency %s, policy allows only %s" % (proposal["currency"], pol["currency"]))
+
+    if pol["require_mandate"]:
+        add("mandate_required", has_mandate, "deny",
+            "this policy requires every purchase to reference a mandate created by the user")
 
     allowed = {m.lower() for m in pol["merchant_allowlist"]}
     add("merchant_allowlist", proposal["merchant"].lower() in allowed, "deny",
@@ -171,3 +191,26 @@ def budget_status():
         "weekly_remaining": str(week_left),
         "allowed_merchants": pol["merchant_allowlist"],
     }
+
+
+_SEVERITY = {"ALLOW": 0, "ESCALATE": 1, "DENY": 2}
+
+
+def tighten(verdict, check):
+    """Add one more check to a verdict. A failed check can only make the decision stricter."""
+    checks = verdict["checks"] + [check]
+    decision, reason = verdict["decision"], verdict["reason"]
+    if check.get("ok", True):
+        if decision == "ALLOW" and check.get("note"):
+            reason = "%s; %s" % (reason, check["note"])
+    else:
+        new = "DENY" if check["level"] == "deny" else "ESCALATE"
+        if decision == "ALLOW":
+            reason = check["detail"]  # replace "all policy checks passed"
+        elif decision == "ESCALATE" and new == "DENY":
+            reason = "%s (the policy rules alone would have asked a human: %s)" % (check["detail"], reason)
+        else:
+            reason = "%s; %s" % (reason, check["detail"])
+        if _SEVERITY[new] > _SEVERITY[decision]:
+            decision = new
+    return {"decision": decision, "reason": reason, "checks": checks}
