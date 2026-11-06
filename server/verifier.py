@@ -120,6 +120,12 @@ def assess(result, pol):
     score = result["match_score"]
     if result["injection_detected"]:
         quote = result["flagged_text"] or (result["reasons"][0] if result["reasons"] else "see reasons")
+        if score >= pol["verifier_escalate_below"]:
+            # The purchase itself still matches the task, so the injection did not change what the agent
+            # is buying. Never auto-approve it, but let a human decide instead of hard-blocking.
+            return {"rule": "intent_verifier", "ok": False, "level": "escalate",
+                    "detail": "prompt injection found in what the agent read, but the purchase matches the task "
+                              "(match %.2f), a human must approve. Flagged: %s" % (score, quote)}
         return {"rule": "intent_verifier", "ok": False, "level": "deny",
                 "detail": "prompt injection suspected: %s" % quote}
     if score < pol["verifier_deny_below"]:

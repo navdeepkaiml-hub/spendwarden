@@ -6,10 +6,11 @@ SpendWarden sits between an AI agent and PayPal. The agent never holds payment
 credentials. Every purchase is checked against hard limits, verified against what the
 user actually asked for, and recorded in a tamper-evident audit log.
 
-Status: Day 4 of the PayPal AI Hackathon build. Purchases go through deterministic policy rules,
-then an LLM intent verifier that compares the purchase with the task the user set (a mandate). The
-verifier treats everything the agent read as untrusted and can only make a decision stricter. Larger
-purchases wait for a human. The dashboard and red-team suite are next.
+Status: Day 5 of the PayPal AI Hackathon build. Purchases go through deterministic policy rules, then an
+LLM intent verifier that compares the purchase with the task the user set (a mandate). The verifier treats
+everything the agent read as untrusted and can only make a decision stricter. A page that contains an
+injection but where the purchase still matches the task goes to a human instead of being hard-blocked.
+A red-team suite of 39 cases measures all of this. The dashboard is next.
 
 ## Quickstart (Windows PowerShell)
 
@@ -46,13 +47,28 @@ MCP server for agents (stdio): `python -m server.mcp_server`
 
 macOS / Linux: replace `.\.venv\Scripts\python` with `.venv/bin/python` and `copy` with `cp`.
 
+## Red team
+
+```powershell
+.\.venv\Scripts\python redteam\run.py                    # live: Gemini judges the intent cases
+.\.venv\Scripts\python redteam\run.py --record           # also record verdicts for offline replay
+.\.venv\Scripts\python redteam\run.py --verifier replay  # offline, no API key
+.\.venv\Scripts\python redteam\run.py --verifier off     # rules-only cases
+```
+
+39 cases: 16 rule attacks, 15 intent attacks (hidden instructions, claimed approvals, task substitution,
+quantity inflation, other languages, base64, attacks on the verifier itself) and 8 legitimate purchases to
+measure false positives. Results are written to `redteam/results.md`. Payments are simulated and every
+case runs on a fresh database.
+
 ## Layout
 
 - `server/` - REST API, MCP server, core logic, PayPal client, ledger
 - `tests/` - offline tests
 - `scripts/` - setup spikes and a purchase client
 - `demo/` - poisoned demo store, demo agent, recorded verifier verdicts for replay mode
-- `dashboard/`, `redteam/` - planned
+- `redteam/` - attack cases and runner
+- `dashboard/` - planned
 - `docs/` - notes and architecture
 
 ## License
