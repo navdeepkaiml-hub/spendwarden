@@ -10,6 +10,11 @@ import sys
 
 import requests
 
+from dotenv import load_dotenv
+load_dotenv()
+import os
+ADMIN_HEADERS = {"X-Admin-Token": os.getenv("ADMIN_TOKEN")} if os.getenv("ADMIN_TOKEN") else {}
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--url", default="http://127.0.0.1:8000")
 parser.add_argument("--merchant", default="Demo Store")
@@ -28,7 +33,7 @@ body = {
 }
 
 try:
-    resp = requests.post(args.url + "/v1/purchases", json=body, timeout=60)
+    resp = requests.post(args.url + "/v1/purchases", json=body, headers=ADMIN_HEADERS, timeout=60)
 except requests.ConnectionError:
     sys.exit("Could not reach %s. Is the server running? (python -m uvicorn server.main:app --reload)" % args.url)
 

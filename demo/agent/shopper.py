@@ -21,6 +21,8 @@ import requests
 from dotenv import load_dotenv
 
 load_dotenv()
+ADMIN_HEADERS = {"X-Admin-Token": os.getenv("ADMIN_TOKEN")} if os.getenv("ADMIN_TOKEN") else {}
+AGENT_HEADERS = {"X-Agent-Token": os.getenv("AGENT_TOKEN")} if os.getenv("AGENT_TOKEN") else {}
 
 DEFAULT_TASK = "Buy a ceramic mug for a friend's birthday, under $20"
 STORE = "http://127.0.0.1:8100"
@@ -51,12 +53,12 @@ class Session:
         return text
 
     def budget(self):
-        return requests.get(self.url + "/v1/budget", timeout=20).json()
+        return requests.get(self.url + "/v1/budget", headers=AGENT_HEADERS, timeout=20).json()
 
     def purchase(self, merchant, items, amount, rationale):
         body = {"merchant": merchant, "items": list(items), "amount": str(amount), "currency": "USD",
                 "rationale": rationale, "mandate_id": self.mandate_id, "evidence": self.pages[-3:]}
-        resp = requests.post(self.url + "/v1/purchases", json=body, timeout=90)
+        resp = requests.post(self.url + "/v1/purchases", json=body, headers=AGENT_HEADERS, timeout=90)
         if resp.status_code >= 400:
             return {"status": "REJECTED_INVALID", "error": resp.text}
         return resp.json()
@@ -136,7 +138,7 @@ def main():
     STORE = args.store.rstrip("/")
 
     try:
-        mandate = requests.post(args.spendwarden.rstrip("/") + "/v1/mandates", json={"task": args.task}, timeout=20).json()
+        mandate = requests.post(args.spendwarden.rstrip("/") + "/v1/mandates", json={"task": args.task}, headers=ADMIN_HEADERS, timeout=20).json()
     except requests.ConnectionError:
         sys.exit("Could not reach SpendWarden at %s. Is the server running?" % args.spendwarden)
     print("User task (mandate %s): %s\n" % (mandate["id"], args.task))

@@ -10,6 +10,7 @@ PAYPAL_BASE_URL = os.getenv("PAYPAL_BASE_URL", "https://api-m.sandbox.paypal.com
 PAYPAL_CLIENT_ID = os.getenv("PAYPAL_CLIENT_ID", "")
 PAYPAL_CLIENT_SECRET = os.getenv("PAYPAL_CLIENT_SECRET", "")
 
+# simulated = no PayPal calls at all (public demo). The demo shows fake payment ids.
 # vault    = charge the buyer's saved payment token, no redirect (needs the vault spike to work)
 # approval = create an order and hand back a link the buyer must approve
 PAYMENT_MODE = os.getenv("PAYMENT_MODE", "vault").strip().lower()
@@ -25,3 +26,14 @@ VERIFIER_MODE = os.getenv("VERIFIER_MODE", "gemini").strip().lower()
 VERIFIER_RECORD = os.getenv("VERIFIER_RECORD", "0").strip().lower() in ("1", "true", "yes")
 VERIFIER_CACHE_PATH = Path(os.getenv("VERIFIER_CACHE_PATH", "demo/replay/verifier_cache.json"))
 VERIFIER_TIMEOUT_SECONDS = float(os.getenv("VERIFIER_TIMEOUT_SECONDS", "25"))
+
+# Access control. Leave both empty for local development (everything open). When deploying, set both:
+#   ADMIN_TOKEN  protects the dashboard, approvals, policy and mandates (header X-Admin-Token)
+#   AGENT_TOKEN  lets an agent propose purchases and read its budget (header X-Agent-Token)
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+AGENT_TOKEN = os.getenv("AGENT_TOKEN", "")
+
+# Public demo: payments simulated, verifier answers replayed, plus /v1/demo/run and /v1/demo/reset.
+DEMO_MODE = os.getenv("DEMO_MODE", "0").strip().lower() in ("1", "true", "yes")
+# Optional: the saved PayPal payment token as an environment variable instead of a file (for hosting).
+PAYPAL_VAULT_ID = os.getenv("PAYPAL_VAULT_ID", "").strip()

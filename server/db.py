@@ -75,3 +75,11 @@ def connect():
 def connect_autocommit():
     """Autocommit connection; the caller manages BEGIN/COMMIT and must close it."""
     return _open(autocommit=True)
+
+
+def reset_all():
+    """Delete every row (used only by the public demo's reset button)."""
+    with connect() as conn:
+        for table in ("purchases", "mandates", "audit", "policy"):
+            conn.execute("DELETE FROM %s" % table)
+        conn.execute("DELETE FROM sqlite_sequence WHERE name = 'audit'")

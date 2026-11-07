@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SpendWarden</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@32.3.3/styles/ag-grid.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@32.3.3/styles/ag-theme-quartz.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="brand"><span class="logo">&#9919;</span> SpendWarden <small>spending firewall for AI agents</small></div>
+  <div class="pills">
+    <span class="pill" id="pill-mode">payments: ...</span>
+    <span class="pill" id="pill-ver">verifier: ...</span>
+    <span class="pill" id="pill-chain">ledger: ...</span>
+  </div>
+</header>
+<nav>
+  <button class="tab active" data-tab="overview">Overview</button>
+  <button class="tab" data-tab="policy">Policy &amp; mandates</button>
+  <button class="tab" data-tab="ledger">Ledger</button>
+</nav>
+<div id="banner" class="banner hidden"></div>
+<div id="demo-bar" class="demo-bar hidden">
+  <span><b>Demo mode.</b> Payments are simulated and the intent verifier answers from recorded results, so no keys are needed.
+  The real PayPal sandbox integration runs locally (see the README and the video).</span>
+  <span class="demo-actions">
+    <button id="demo-run" class="primary">Run demo scenes</button>
+    <button id="demo-reset" class="secondary">Reset</button>
+    <span id="demo-msg" class="msg"></span>
+  </span>
+</div>
+
+<main>
+  <section id="view-overview">
+    <div id="tiles" class="tiles"></div>
+    <h2>Waiting for a human <span class="count" id="approval-count"></span></h2>
+    <div id="approvals"></div>
+    <h2>Decisions <small>click a row for the full record</small></h2>
+    <div id="grid" class="ag-theme-quartz grid"></div>
+  </section>
+
+  <section id="view-policy" class="hidden">
+    <h2>Spending policy</h2>
+    <form id="policy-form" class="form" autocomplete="off">
+      <label>Currency<input id="pol-currency" maxlength="3"></label>
+      <label>Per-purchase cap<input id="pol-cap" inputmode="decimal"></label>
+      <label>Auto-approve up to<input id="pol-auto" inputmode="decimal"></label>
+      <label>Daily budget (rolling 24h)<input id="pol-daily" inputmode="decimal"></label>
+      <label>Weekly budget (rolling 7 days)<input id="pol-weekly" inputmode="decimal"></label>
+      <label class="wide">Allowed merchants (comma separated)<textarea id="pol-allow" rows="2"></textarea></label>
+      <label>Circuit breaker: max requests<input id="pol-vmax" inputmode="numeric"></label>
+      <label>...within seconds<input id="pol-vwin" inputmode="numeric"></label>
+      <label>Verifier: ask a human below match<input id="pol-esc" inputmode="decimal"></label>
+      <label>Verifier: deny below match<input id="pol-deny" inputmode="decimal"></label>
+      <label class="check wide"><input type="checkbox" id="pol-req"> Every purchase must reference a mandate created by the user</label>
+      <div class="wide"><button type="submit" class="primary">Save policy</button> <span id="policy-msg" class="msg"></span></div>
+    </form>
+
+    <h2>Mandates <small>what the user actually asked the agent to do</small></h2>
+    <form id="mandate-form" class="inline">
+      <input id="mandate-task" placeholder="e.g. Buy a ceramic mug for a friend, under $20" maxlength="1000">
+      <button type="submit" class="primary">Create mandate</button> <span id="mandate-msg" class="msg"></span>
+    </form>
+    <ul id="mandates" class="plain"></ul>
+  </section>
+
+  <section id="view-ledger" class="hidden">
+    <h2>Audit ledger <small>each entry contains the hash of the one before it</small></h2>
+    <div id="chain-detail" class="chain"></div>
+    <div id="ledger-grid" class="ag-theme-quartz grid"></div>
+  </section>
+</main>
+
+<aside id="drawer" class="drawer hidden" aria-live="polite">
+  <button id="drawer-close" class="close" aria-label="Close">&times;</button>
+  <div id="drawer-body"></div>
+</aside>
+
+<div id="login" class="overlay hidden">
+  <form id="login-form" class="card">
+    <h2>Sign in</h2>
+    <p>Enter the admin token for this SpendWarden server.</p>
+    <input id="login-token" type="password" placeholder="Admin token" autocomplete="off">
+    <button type="submit" class="primary">Continue</button>
+  </form>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/ag-grid-community@32.3.3/dist/ag-grid-community.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

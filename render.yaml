@@ -1,0 +1,18 @@
+# Render Blueprint: a public demo with simulated payments and recorded verifier answers (no secrets needed).
+services:
+  - type: web
+    name: spendwarden
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m uvicorn server.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.3
+      - key: DEMO_MODE
+        value: "1"
+      - key: PAYMENT_MODE
+        value: simulated
+      - key: VERIFIER_MODE
+        value: replay

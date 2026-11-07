@@ -6,11 +6,11 @@ SpendWarden sits between an AI agent and PayPal. The agent never holds payment
 credentials. Every purchase is checked against hard limits, verified against what the
 user actually asked for, and recorded in a tamper-evident audit log.
 
-Status: Day 5 of the PayPal AI Hackathon build. Purchases go through deterministic policy rules, then an
+Status: Day 7 of the PayPal AI Hackathon build. Purchases go through deterministic policy rules, then an
 LLM intent verifier that compares the purchase with the task the user set (a mandate). The verifier treats
-everything the agent read as untrusted and can only make a decision stricter. A page that contains an
-injection but where the purchase still matches the task goes to a human instead of being hard-blocked.
-A red-team suite of 39 cases measures all of this. The dashboard is next.
+everything the agent read as untrusted and can only make a decision stricter. Larger or suspicious purchases
+wait for a human, who decides in a web dashboard. A red-team suite of 39 cases measures all of this.
+A public demo mode lets anyone try it without keys.
 
 ## Quickstart (Windows PowerShell)
 
@@ -47,6 +47,28 @@ MCP server for agents (stdio): `python -m server.mcp_server`
 
 macOS / Linux: replace `.\.venv\Scripts\python` with `.venv/bin/python` and `copy` with `cp`.
 
+## Dashboard
+
+Start the server and open http://127.0.0.1:8000/ . It shows the approval queue (with the user's task, the
+intent score and any flagged text next to each request), budgets, every decision in a sortable table, a
+full record per purchase (checks, verifier reasoning, PayPal ids, audit receipt), a policy editor, and the
+hash-chained ledger with a live verification badge. Text that comes from agents or web pages is always
+displayed as plain text.
+
+Deploying: set `ADMIN_TOKEN` (dashboard, approvals, policy) and `AGENT_TOKEN` (agent requests) in the
+environment to long random strings. With both unset everything is open, which is only safe on localhost.
+An agent token cannot approve a purchase, change policy or read other purchases.
+
+## Try it without any keys (hosted demo)
+
+The hosted demo runs in demo mode: payments are **simulated** (the ids start with `SIM-`) and the intent
+verifier answers from verdicts recorded earlier with real Gemini (`demo/replay/verifier_cache.json`). Open the
+page and click **Run demo scenes**: A is paid, B is denied by the rules, D is denied by the intent verifier,
+and C waits under "Waiting for a human" until you approve it. The real PayPal sandbox integration is what the
+video and the local setup below use.
+
+Run the same mode locally: `DEMO_MODE=1 PAYMENT_MODE=simulated VERIFIER_MODE=replay` (see `render.yaml`).
+
 ## Red team
 
 ```powershell
@@ -61,14 +83,25 @@ quantity inflation, other languages, base64, attacks on the verifier itself) and
 measure false positives. Results are written to `redteam/results.md`. Payments are simulated and every
 case runs on a fresh database.
 
+Latest live run (Gemini intent verifier): no attack produced a payment (31 of 31: 24 denied, 5 rejected as
+invalid input, 2 held for a human because the item was right but the page was hostile), and all 8
+legitimate purchases were handled correctly.
+
+What this does and does not show: the 39 cases were written by the project author, so this is a regression
+suite and a baseline, not an independent audit. The intent cases depend on one model at temperature 0 and
+may change with the model version. An adaptive attacker will probably find gaps. The verifier only sees the
+page text that the agent runtime passes to SpendWarden; if a compromised agent withholds it, the purchase
+is still checked against the task and the rules, but the injected text itself is not visible. Everything
+runs against the PayPal sandbox with no real money.
+
 ## Layout
 
-- `server/` - REST API, MCP server, core logic, PayPal client, ledger
+- `server/` - REST API, dashboard hosting, MCP server, core logic, PayPal client, ledger
 - `tests/` - offline tests
 - `scripts/` - setup spikes and a purchase client
 - `demo/` - poisoned demo store, demo agent, recorded verifier verdicts for replay mode
 - `redteam/` - attack cases and runner
-- `dashboard/` - planned
+- `dashboard/` - web dashboard (plain HTML and JavaScript, no build step; AG Grid for the tables)
 - `docs/` - notes and architecture
 
 ## License

@@ -131,6 +131,8 @@ def list_purchases(limit=50, status=None):
 
 
 def _read_vault_id():
+    if config.PAYPAL_VAULT_ID:
+        return config.PAYPAL_VAULT_ID
     try:
         vault_id = config.VAULT_TOKEN_FILE.read_text().strip()
     except OSError:
@@ -142,24 +144,28 @@ def _read_vault_id():
 
 def _pay(purchase_id, p):
     try:
-        token = paypal.get_token()
-        if config.PAYMENT_MODE == "vault":
-            result = paypal.summarize(
-                paypal.charge_vault(token, _read_vault_id(), p["amount"], p["currency"], purchase_id)
-            )
-            if result["capture_status"] == "COMPLETED":
-                fields = {"status": "PAID", "paypal_order_id": result["order_id"], "paypal_capture_id": result["capture_id"]}
-            else:
-                fields = {
-                    "status": "PAYMENT_FAILED",
-                    "paypal_order_id": result["order_id"],
-                    "error": "unexpected order status %s" % result["order_status"],
-                }
-        elif config.PAYMENT_MODE == "approval":
-            order_id, url = paypal.create_order_for_approval(token, p["amount"], p["currency"], purchase_id)
-            fields = {"status": "AWAITING_PAYER", "paypal_order_id": order_id, "approve_url": url}
+        if config.PAYMENT_MODE == "simulated":
+            sim = uuid.uuid4().hex[:10].upper()
+            fields = {"status": "PAID", "paypal_order_id": "SIM-ORDER-" + sim, "paypal_capture_id": "SIM-CAPTURE-" + sim}
         else:
-            raise PaymentConfigError("PAYMENT_MODE must be 'vault' or 'approval', got %r" % config.PAYMENT_MODE)
+            token = paypal.get_token()
+            if config.PAYMENT_MODE == "vault":
+                result = paypal.summarize(
+                    paypal.charge_vault(token, _read_vault_id(), p["amount"], p["currency"], purchase_id)
+                )
+                if result["capture_status"] == "COMPLETED":
+                    fields = {"status": "PAID", "paypal_order_id": result["order_id"], "paypal_capture_id": result["capture_id"]}
+                else:
+                    fields = {
+                        "status": "PAYMENT_FAILED",
+                        "paypal_order_id": result["order_id"],
+                        "error": "unexpected order status %s" % result["order_status"],
+                    }
+            elif config.PAYMENT_MODE == "approval":
+                order_id, url = paypal.create_order_for_approval(token, p["amount"], p["currency"], purchase_id)
+                fields = {"status": "AWAITING_PAYER", "paypal_order_id": order_id, "approve_url": url}
+            else:
+                raise PaymentConfigError("PAYMENT_MODE must be 'vault', 'approval' or 'simulated', got %r" % config.PAYMENT_MODE)
     except (paypal.PayPalError, PaymentConfigError) as exc:
         fields = {"status": "PAYMENT_FAILED", "error": str(exc)}
     _update(purchase_id, **fields)
@@ -264,3 +270,17 @@ def capture_approved(purchase_id):
         _update(purchase_id, **fields)
         ledger.append(purchase_id, "capture_result", fields)
         return get_purchase(purchase_id)
+
+
+def receipt(purchase_id):
+    """Everything about one purchase: the record, the user's task, and its slice of the audit chain."""
+    purchase = get_purchase(purchase_id)
+    mandate = None
+    if purchase.get("mandate_id"):
+        try:
+            mandate = get_mandate(purchase["mandate_id"])
+        except LookupError:
+            pass
+    return {"purchase": purchase, "mandate": mandate,
+            "entries": ledger.entries(limit=200, purchase_id=purchase_id, ascending=True),
+            "chain": ledger.verify()}

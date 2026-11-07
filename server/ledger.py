@@ -59,3 +59,25 @@ def verify():
         return {"ok": True, "entries": count}
     finally:
         conn.close()
+
+
+def entries(limit=200, purchase_id=None, ascending=False):
+    """Ledger entries as dicts, newest first by default."""
+    conn = db.connect_autocommit()
+    try:
+        rows = conn.execute("SELECT seq, prev_hash, payload, hash FROM audit ORDER BY seq DESC").fetchall()
+    finally:
+        conn.close()
+    out = []
+    for row in rows:
+        body = json.loads(row["payload"])
+        if purchase_id is not None and body.get("purchase_id") != purchase_id:
+            continue
+        out.append({"seq": row["seq"], "ts": body.get("ts"), "event": body.get("event"),
+                    "purchase_id": body.get("purchase_id"), "data": body.get("data"),
+                    "hash": row["hash"], "prev_hash": row["prev_hash"]})
+        if len(out) >= int(limit):
+            break
+    if ascending:
+        out.reverse()
+    return out
